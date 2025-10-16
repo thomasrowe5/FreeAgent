@@ -1,0 +1,25 @@
+{
+  "name": "freeagent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasrowe5/FreeAgent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/thomasrowe5/FreeAgent/issues"
+  },
+  "homepage": "https://github.com/thomasrowe5/FreeAgent#readme",
+  "dependencies": {
+    "next": "^15.5.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}
