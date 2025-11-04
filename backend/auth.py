@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 from typing import Iterable, Optional, Set
 
 import jwt
@@ -6,6 +7,8 @@ from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+from backend.db import Organization, User, get_session
 
 
 class SupabaseAuthMiddleware(BaseHTTPMiddleware):
@@ -56,8 +59,29 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
         if not user_id:
             raise HTTPException(status_code=401, detail="Token missing user identifier")
 
+        async with get_session() as session:
+            user = await session.get(User, user_id)
+            if not user:
+                org_id = uuid4().hex
+                org = Organization(id=org_id, name=email or user_id, plan="free")
+                user = User(id=user_id, email=email or "", org_id=org_id)
+                session.add(org)
+                session.add(user)
+                await session.commit()
+            elif not user.org_id:
+                org_id = uuid4().hex
+                org = Organization(id=org_id, name=email or user_id, plan="free")
+                user.org_id = org_id
+                session.add(org)
+                session.add(user)
+                await session.commit()
+            org_id = user.org_id
+            org = await session.get(Organization, org_id)
+
         request.state.user_id = user_id
+        request.state.org_id = org_id
         request.state.email = email
         request.state.token = token
         request.state.jwt_payload = payload
+        request.state.org = org
         return await call_next(request)

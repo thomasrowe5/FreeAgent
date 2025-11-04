@@ -8,11 +8,14 @@ from sqlmodel import select
 
 from backend.agents.followups import compose as compose_followup
 from backend.agents.lead_scoring import score as score_lead
-from backend.agents.proposal_gen import draft as draft_proposal
+from backend.agents.proposal_gen import draft_with_context as draft_proposal
 from backend.analytics import recompute_snapshot_for_user
 from backend.db import GmailToken, Lead, Proposal, Run, get_session
 from backend.integrations.gmail import send_email as gmail_send_email
 from backend import billing, monitoring
+from backend.memory.context import add_memory, search_memory
+from backend.memory import vector_memory
+from backend.feedback.loop import feedback_loop
 
 
 @dataclass
@@ -22,6 +25,7 @@ class WorkflowResult:
     proposal_id: Optional[int] = None
     email_sent: bool = False
     followup_status: Optional[str] = None
+    reward_score: Optional[float] = None
 
 
 class Workflow:
@@ -39,16 +43,27 @@ class Workflow:
         "followup": "followup",
     }
 
-    def __init__(self, lead_id: int, user_id: str, *, max_attempts: int = 3, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        lead_id: int,
+        user_id: str,
+        org_id: Optional[str] = None,
+        *,
+        max_attempts: int = 3,
+        logger: Optional[logging.Logger] = None,
+    ):
         self.lead_id = lead_id
         self.user_id = user_id
+        self.org_id = org_id
         self.max_attempts = max_attempts
         self.logger = logger or logging.getLogger("workflow")
         self._usage_recorded: set[str] = set()
+        self.last_reward: Optional[float] = None
 
     async def run(self, start_from: str = "score") -> WorkflowResult:
         result = WorkflowResult(lead_id=self.lead_id)
         start_index = self._get_step_index(start_from)
+        self.last_reward = None
 
         try:
             if start_index <= self._get_step_index("score"):
@@ -58,6 +73,7 @@ class Workflow:
                 proposal = await self._run_with_retry("proposal", self._generate_proposal)
                 if proposal:
                     result.proposal_id = proposal.id
+                    result.reward_score = self.last_reward
 
             if start_index <= self._get_step_index("send"):
                 sent = await self._run_with_retry("send", self._send_proposal_email, allow_skip=True)
@@ -67,7 +83,11 @@ class Workflow:
                 status = await self._run_with_retry("followup", self._schedule_followup)
                 result.followup_status = status
         finally:
-            await recompute_snapshot_for_user(self.user_id)
+            try:
+                org_id = await self._resolve_org_id()
+                await recompute_snapshot_for_user(self.user_id, org_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                monitoring.capture_exception(exc)
 
         return result
 
@@ -98,7 +118,8 @@ class Workflow:
             started = time.perf_counter()
             try:
                 if usage_action and attempt == 1 and usage_action not in self._usage_recorded:
-                    await billing.increment_usage(self.user_id, usage_action)
+                    org_id = await self._resolve_org_id()
+                    await billing.increment_usage(org_id, usage_action)
                     self._usage_recorded.add(usage_action)
 
                 self._log(step, "start", attempt)
@@ -108,6 +129,7 @@ class Workflow:
                     await monitoring.record_run(
                         stage=stage_name,
                         user_id=self.user_id,
+                        org_id=self.org_id,
                         lead_id=self.lead_id,
                         success=True,
                         duration_ms=duration_ms,
@@ -122,6 +144,7 @@ class Workflow:
                     await monitoring.record_run(
                         stage=stage_name,
                         user_id=self.user_id,
+                        org_id=self.org_id,
                         lead_id=self.lead_id,
                         success=False,
                         duration_ms=duration_ms,
@@ -160,16 +183,56 @@ class Workflow:
         except Exception:  # pragma: no cover - fallback
             return str(value)
 
+    async def _resolve_org_id(self) -> str:
+        if self.org_id:
+            return self.org_id
+        async with get_session() as session:
+            lead = await session.get(Lead, self.lead_id)
+            if lead and lead.org_id:
+                self.org_id = lead.org_id
+        if not self.org_id:
+            raise ValueError("Organization context not available for workflow")
+        return self.org_id
+
+    def _ensure_lead_org(self, lead: Lead) -> None:
+        if not lead.org_id:
+            raise ValueError("Lead missing organization context")
+        if self.org_id is None:
+            self.org_id = lead.org_id
+        elif lead.org_id != self.org_id:
+            raise ValueError("Lead/org mismatch")
+
     async def _score_lead(self) -> float:
         async with get_session() as session:
             lead = await session.get(Lead, self.lead_id)
             if not lead:
                 raise ValueError(f"Lead {self.lead_id} not found")
-            score = score_lead(lead.name, lead.email, lead.message)
+            self._ensure_lead_org(lead)
+            vector_context = await asyncio.to_thread(
+                vector_memory.retrieve_context,
+                "lead_scorer",
+                lead.message,
+                3,
+            )
+            score = score_lead(lead.name, lead.email, lead.message, context=vector_context)
             lead.score = score
             session.add(lead)
-            session.add(Run(kind="lead_scoring", lead_id=lead.id))
+            session.add(Run(kind="lead_scoring", lead_id=lead.id, org_id=self.org_id))
             await session.commit()
+            await add_memory(
+                user_id=self.user_id,
+                org_id=self.org_id,
+                key=f"lead:{lead.id}:message",
+                value=lead.message,
+                payload={"lead_id": lead.id, "type": "lead_message"},
+            )
+            await asyncio.to_thread(
+                vector_memory.save_interaction,
+                "lead_scorer",
+                lead,
+                lead.message,
+                {"score": score, "lead_id": lead.id},
+            )
             return score
 
     async def _generate_proposal(self) -> Proposal:
@@ -177,14 +240,43 @@ class Workflow:
             lead = await session.get(Lead, self.lead_id)
             if not lead:
                 raise ValueError(f"Lead {self.lead_id} not found")
-            content = draft_proposal(lead.name, lead.message)
-            proposal = Proposal(lead_id=lead.id, content=content)
+            self._ensure_lead_org(lead)
+            memories = await search_memory(self.user_id, self.org_id, lead.message, limit=5)
+            vector_context = await asyncio.to_thread(
+                vector_memory.retrieve_context,
+                "proposal_gen",
+                lead.message,
+                3,
+            )
+            content = draft_proposal(lead.name, lead.message, memories, vector_context=vector_context)
+            proposal = Proposal(lead_id=lead.id, org_id=lead.org_id, content=content)
             lead.status = "proposal_sent"
             session.add(proposal)
             session.add(lead)
-            session.add(Run(kind="proposal", lead_id=lead.id))
+            session.add(Run(kind="proposal", lead_id=lead.id, org_id=self.org_id))
             await session.commit()
             await session.refresh(proposal)
+            reward = await feedback_loop.score_generation(
+                agent="proposal",
+                prompt=lead.message,
+                output_text=content,
+                context={"lead_id": lead.id, "org_id": self.org_id},
+            )
+            self.last_reward = reward
+            await add_memory(
+                user_id=self.user_id,
+                org_id=self.org_id,
+                key=f"lead:{lead.id}:proposal",
+                value=content,
+                payload={"lead_id": lead.id, "type": "proposal", "reward": reward},
+            )
+            await asyncio.to_thread(
+                vector_memory.save_interaction,
+                "proposal_gen",
+                lead,
+                content,
+                {"proposal_id": proposal.id, "reward": reward, "status": lead.status},
+            )
             return proposal
 
     async def _send_proposal_email(self) -> bool:
@@ -204,6 +296,7 @@ class Workflow:
             lead = await session.get(Lead, self.lead_id)
             if not lead or not proposal:
                 raise ValueError("Proposal not found for lead")
+            self._ensure_lead_org(lead)
             subject = f"Proposal for {lead.name}"
             body = proposal.content
             recipient = lead.email
@@ -216,9 +309,30 @@ class Workflow:
             lead = await session.get(Lead, self.lead_id)
             if not lead:
                 raise ValueError(f"Lead {self.lead_id} not found")
-            followup_text = compose_followup(lead.name, 3, lead.message)
+            self._ensure_lead_org(lead)
+            vector_context = await asyncio.to_thread(
+                vector_memory.retrieve_context,
+                "followups",
+                lead.message,
+                3,
+            )
+            followup_text = compose_followup(lead.name, 3, lead.message, context=vector_context)
             lead.status = "followup_pending"
             session.add(lead)
-            session.add(Run(kind="followup", lead_id=lead.id))
+            session.add(Run(kind="followup", lead_id=lead.id, org_id=self.org_id))
             await session.commit()
+            await add_memory(
+                user_id=self.user_id,
+                org_id=self.org_id,
+                key=f"lead:{lead.id}:followup",
+                value=followup_text,
+                payload={"lead_id": lead.id, "type": "followup"},
+            )
+            await asyncio.to_thread(
+                vector_memory.save_interaction,
+                "followups",
+                lead,
+                followup_text,
+                {"lead_id": lead.id, "status": lead.status},
+            )
             return lead.status

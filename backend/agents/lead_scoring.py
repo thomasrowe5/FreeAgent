@@ -1,8 +1,10 @@
+"""Lead scoring agent utilities for evaluating inbound requests."""
+
 import json
 import math
 import os
 from functools import lru_cache
-from typing import Optional
+from typing import Iterable, Optional
 
 from backend import monitoring
 
@@ -10,6 +12,24 @@ try:
     from openai import OpenAI
 except ImportError:  # pragma: no cover - OpenAI optional dependency
     OpenAI = None  # type: ignore[assignment]
+
+
+def _format_context(context: Optional[Iterable[dict]]) -> str:
+    if not context:
+        return ""
+    lines = []
+    for item in context:
+        text = (item or {}).get("text") or ""
+        meta = (item or {}).get("metadata") or {}
+        lead_name = meta.get("lead_name")
+        outcome = meta.get("outcome")
+        prefix = f"{lead_name}: " if lead_name else ""
+        snippet = text.strip().replace("\n", " ")[:300]
+        summary = f"{prefix}{snippet}"
+        if outcome:
+            summary += f" | Outcome: {outcome}"
+        lines.append(f"- {summary}")
+    return "\n".join(lines)
 
 
 def _fallback_score(message: str) -> float:
@@ -54,16 +74,31 @@ def _extract_score(raw: str) -> Optional[float]:
     return None
 
 
-def score(name: str, email: str, message: str) -> float:
+def score(name: str, email: str, message: str, context: Optional[Iterable[dict]] = None) -> float:
+    """Return a normalized score describing the quality of a lead.
+
+    Args:
+        name: Prospect name.
+        email: Prospect email address.
+        message: Free-form lead description or inquiry.
+        context: Optional enriched context retrieved from vector memory.
+
+    Returns:
+        float: Value between 0 and 1 representing priority.
+    """
     client = _get_client()
     if not client:
         return _fallback_score(message)
+
+    context_section = _format_context(context)
+    context_block = f"\nRecent outcomes:\n{context_section}\n" if context_section else ""
 
     prompt = (
         "You classify inbound leads. "
         "Return JSON like {\"score\": 0.0-1.0}. "
         "Score higher when the prospect mentions budget, timeline, or clear intent to start. "
         "Score lower when intent is vague or exploratory.\n\n"
+        f"{context_block}"
         f"Name: {name}\nEmail: {email}\nMessage: {message}"
     )
 

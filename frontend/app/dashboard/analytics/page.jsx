@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, LineChart, Line, Legend } from "recharts";
 
 import { getJSON } from "@/lib/api";
 
@@ -10,6 +10,8 @@ export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({ start: "", end: "", clientType: "all" });
+  const [revenueOverview, setRevenueOverview] = useState(null);
+  const [streamPoints, setStreamPoints] = useState([]);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -32,29 +34,86 @@ export default function AnalyticsDashboard() {
     }
   }, [filters]);
 
+  const fetchRevenueOverview = useCallback(async () => {
+    try {
+      const data = await getJSON("/analytics/revenue");
+      setRevenueOverview(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSummary();
     const interval = setInterval(fetchSummary, 60_000);
     return () => clearInterval(interval);
   }, [fetchSummary]);
 
+  useEffect(() => {
+    fetchRevenueOverview();
+    const interval = setInterval(fetchRevenueOverview, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchRevenueOverview]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const base = (process.env.NEXT_PUBLIC_API_URL || window.location.origin).replace(/\/$/, "");
+    const wsUrl = base
+      .replace(/^https:/i, "wss:")
+      .replace(/^http:/i, "ws:") + "/ws/metrics";
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setStreamPoints((prev) => {
+          const next = prev.slice(-99);
+          next.push({
+            ...data,
+            timestamp: data.timestamp || new Date().toISOString(),
+          });
+          return next;
+        });
+      } catch (err) {
+        console.error("Failed to parse metrics event", err);
+      }
+    };
+
+    ws.onerror = (event) => {
+      console.error("Metrics websocket error", event);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
   const kpis = useMemo(() => {
-    if (!summary) {
+    if (!summary && !revenueOverview) {
       return {
         conversion: "-",
         revenue: "-",
         leads: "-",
       };
     }
+    const conversionRate =
+      "conversion_rate" in (revenueOverview || {})
+        ? revenueOverview?.conversion_rate ?? 0
+        : summary?.conversion_rate ?? 0;
+    const totalRevenue =
+      "total_revenue" in (revenueOverview || {})
+        ? revenueOverview?.total_revenue ?? 0
+        : summary?.revenue ?? 0;
+
     return {
-      conversion: `${Math.round((summary.conversion_rate || 0) * 100)}%`,
-      revenue: `$${(summary.revenue || 0).toLocaleString(undefined, {
+      conversion: `${Math.round((conversionRate || 0) * 100)}%`,
+      revenue: `$${(totalRevenue || 0).toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}`,
-      leads: summary.leads ?? 0,
+      leads: summary?.leads ?? 0,
     };
-  }, [summary]);
+  }, [summary, revenueOverview]);
 
   const statusData = useMemo(() => {
     if (!summary?.status_breakdown) return [];
@@ -62,12 +121,25 @@ export default function AnalyticsDashboard() {
   }, [summary]);
 
   const revenueData = useMemo(() => {
-    if (!summary?.revenue_by_month) return [];
-    return summary.revenue_by_month.map((row) => ({
+    const rows =
+      revenueOverview?.monthly ?? summary?.revenue_by_month ?? [];
+    return rows.map((row) => ({
       month: row.month,
       revenue: row.revenue,
     }));
-  }, [summary]);
+  }, [revenueOverview, summary]);
+
+  const metricsChartData = useMemo(
+    () =>
+      streamPoints.map((point, index) => ({
+        index,
+        timestamp: point.timestamp,
+        latency: point.duration_ms ?? 0,
+        tokens: point.token_usage ?? 0,
+        cost: point.cost ?? 0,
+      })),
+    [streamPoints]
+  );
 
   return (
     <main style={{ padding: 24 }}>
@@ -142,6 +214,35 @@ export default function AnalyticsDashboard() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+      </section>
+
+      <section
+        style={{
+          marginTop: 24,
+          border: "1px solid #eee",
+          borderRadius: 8,
+          padding: 16,
+          minHeight: 320,
+        }}
+      >
+        <h3>Agent Run Metrics</h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={metricsChartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="timestamp" />
+            <YAxis yAxisId="left" label={{ value: "Latency (ms)", angle: -90, position: "insideLeft" }} />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              label={{ value: "Tokens / Cost", angle: 90, position: "insideRight" }}
+            />
+            <Tooltip />
+            <Legend />
+            <Line yAxisId="left" type="monotone" dataKey="latency" stroke="#2563eb" name="Latency" dot={false} />
+            <Line yAxisId="right" type="monotone" dataKey="tokens" stroke="#16a34a" name="Tokens" dot={false} />
+            <Line yAxisId="right" type="monotone" dataKey="cost" stroke="#f97316" name="Cost" dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
       </section>
     </main>
   );

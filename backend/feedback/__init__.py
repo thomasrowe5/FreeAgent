@@ -1,13 +1,12 @@
-import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
 from sqlmodel import select
 
 from backend.db import Feedback, get_session
+from backend.feedback.loop import feedback_loop
 
 logger = logging.getLogger("feedback")
 
@@ -15,6 +14,7 @@ logger = logging.getLogger("feedback")
 async def save_feedback(
     *,
     user_id: str,
+    org_id: Optional[str],
     lead_id: Optional[int],
     feedback_type: str,
     comment: Optional[str],
@@ -22,6 +22,7 @@ async def save_feedback(
 ) -> Feedback:
     entry = Feedback(
         user_id=user_id,
+        org_id=org_id,
         lead_id=lead_id,
         type=feedback_type,
         comment=comment,
@@ -32,6 +33,7 @@ async def save_feedback(
         session.add(entry)
         await session.commit()
         await session.refresh(entry)
+    feedback_loop.mark_dirty()
     logger.info(
         "feedback_saved",
         extra={
@@ -45,12 +47,12 @@ async def save_feedback(
     return entry
 
 
-async def aggregate_feedback(user_id: str, limit: int = 5) -> List[Dict[str, int]]:
+async def aggregate_feedback(user_id: str, org_id: Optional[str], limit: int = 5) -> List[Dict[str, int]]:
     async with get_session() as session:
         rows = (
             await session.exec(
                 select(Feedback.type, func.count())
-                .where(Feedback.user_id == user_id)
+                .where(Feedback.user_id == user_id, Feedback.org_id == org_id)
                 .group_by(Feedback.type)
                 .order_by(func.count().desc())
                 .limit(limit)
@@ -76,25 +78,9 @@ async def analyze_feedback(limit: int = 50) -> None:
     logger.info("feedback_analysis", extra={"feedback": {"summary": summary}})
 
 
-async def export_dataset(path: Path) -> int:
-    async with get_session() as session:
-        entries = (
-            await session.exec(select(Feedback).order_by(Feedback.timestamp.asc()))
-        ).all()
-    if not entries:
-        return 0
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for entry in entries:
-            record = {
-                "prompt": entry.comment or "",
-                "completion": entry.edited_text or "",
-                "metadata": {
-                    "user_id": entry.user_id,
-                    "lead_id": entry.lead_id,
-                    "type": entry.type,
-                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-                },
-            }
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return len(entries)
+async def export_dataset(org_id: Optional[str] = None):
+    return await feedback_loop.export_dataset(org_id=org_id)
+
+
+async def insights(org_id: Optional[str]) -> Dict[str, Any]:
+    return await feedback_loop.insights(org_id)

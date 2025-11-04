@@ -1,6 +1,7 @@
 import logging
 import os
 import traceback
+from datetime import datetime
 from typing import Optional
 
 try:  # pragma: no cover - optional dependency
@@ -11,6 +12,7 @@ except ImportError:  # pragma: no cover - optional dependency
     LoggingIntegration = None  # type: ignore[assignment]
 
 from backend.db import RunHistory, get_session
+from backend.analytics import realtime
 
 _logger = logging.getLogger("freeagent")
 _initialized = False
@@ -47,13 +49,17 @@ async def record_run(
     *,
     stage: str,
     user_id: str,
+    org_id: Optional[str],
     lead_id: Optional[int],
     success: bool,
     duration_ms: float,
     error_text: Optional[str] = None,
+    token_usage: Optional[int] = None,
+    cost: Optional[float] = None,
 ) -> None:
     entry = RunHistory(
         user_id=user_id,
+        org_id=org_id,
         lead_id=lead_id,
         stage=stage,
         success=success,
@@ -63,6 +69,18 @@ async def record_run(
     async with get_session() as session:
         session.add(entry)
         await session.commit()
+    event = {
+        "stage": stage,
+        "user_id": user_id,
+        "org_id": org_id,
+        "lead_id": lead_id,
+        "success": success,
+        "duration_ms": duration_ms,
+        "token_usage": token_usage,
+        "cost": cost,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    await realtime.publish_run_event(event)
 
 
 def capture_exception(exc: BaseException) -> None:

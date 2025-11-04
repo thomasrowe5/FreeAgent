@@ -1,41 +1,58 @@
-# FreeAgent: AI Ops Manager for Freelancers
+# FreeAgent
 
-## How to Run Locally
+## Overview
+FreeAgent is a modular AI-agent freelance platform enabling autonomous lead generation, proposal writing, and client communication. The system pairs configurable agents with a collaborative dashboard so founding teams can orchestrate lead intake, outreach, and follow-ups in one automated workspace.
 
-1. **Install prerequisites**
-   - Python 3.11+
-   - Node.js 20+
-   - Redis & Postgres (or use Docker Compose below)
+## Features
+- **Lead Scoring & Triage** – ingest inbound requests, classify urgency, and prioritize follow-up actions.
+- **Proposal Generation** – craft branded proposals with memory-aware context and tone controls.
+- **Automated Follow-ups** – schedule nudges, send Gmail sequences, and log engagement metrics.
+- **Analytics & Self-Optimization** – monitor conversion, revenue trends, run history, and trigger weekly prompt tuning.
+- **Branding & Campaigns** – manage logos, colors, PDFs, and marketing templates with tone training.
 
-2. **Clone & install dependencies**
-   ```bash
-   git clone https://github.com/your-org/freeagent.git
-   cd freeagent
-   python -m venv .venv && source .venv/bin/activate
-   pip install -r requirements.txt
-   cd frontend && npm install && cd ..
-   ```
+## Tech Stack
+- **Backend**: FastAPI, SQLModel, Celery, Redis, Postgres/Neon
+- **Frontend**: Next.js (React), Tailwind/shadcn components, Supabase Auth
+- **Agents**: OpenAI GPT-4o family, ChromaDB vector memory, custom reward optimizer
+- **Ops & Deploy**: Docker Compose, Render (API/worker), Vercel (web)
 
-3. **Environment variables**
-   - Copy `.env.example` → `.env` and fill in API keys (Supabase, OpenAI, Google, Stripe, Sentry, etc.).
-   - Export `NEXT_PUBLIC_API_URL` for the frontend.
+## Quick Start
+```bash
+# 1. Clone and install
+git clone https://github.com/your-org/freeagent.git
+cd freeagent
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
 
-4. **Run services**
-   ```bash
-   docker compose -f infra/docker-compose.yml up --build
-   ```
-   This launches Postgres, Redis, FastAPI API, Celery worker, and Next.js frontend.
+# 2. Configure environment
+cp .env.example .env
+export OPENAI_API_KEY=sk-yourkey
 
-5. **Seed demo data (optional)**
-   ```bash
-   source .venv/bin/activate
-   python scripts/seed_demo_data.py
-   ```
+# 3. Launch stack (API, worker, frontend, Postgres, Redis)
+docker compose -f infra/docker-compose.yml up --build
 
-6. **Visit the app**
-   - Frontend: http://localhost:3000 (landing page at `/landing`, dashboard at `/dashboard`).
-   - API docs: http://localhost:8000/docs
+# 4. Seed demo content (optional)
+python scripts/seed_demo_data.py
+```
+- Frontend: http://localhost:3000 (`/dashboard`, `/marketing`)
+- API Docs: http://localhost:8000/docs
 
-## Project Scripts
-- `scripts/seed_demo_data.py`: populate demo leads and proposals
-- `scripts/demo_outline.txt`: Loom video talking points
+## Folder Structure
+```
+backend/           FastAPI services, agents, workflows, branding, analytics
+frontend/          Next.js dashboard, marketing builder, Supabase helpers
+docs/              Architecture, API reference, guides
+infra/             Docker Compose, deployment manifests
+scripts/           Data seeding, demo outlines, utilities
+data/              Persisted branding assets, optimized prompts, memory stores
+```
+
+## Future Roadmap
+- **Phase 2**
+  - Billing upgrades with usage-based plans and Stripe checkout.
+  - Team roles, shared queues, and organizational workspaces.
+  - Marketplace for reusable agent templates and vertical-specific playbooks.
+
+## License
+Released under the [MIT License](LICENSE).

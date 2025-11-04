@@ -1,0 +1,12 @@
+name: Strategist
+class: StrategistAgent
+role: Success Strategist
+goal: Design a phased delivery plan for the client
+tools:
+  - planner
+  - analytics
+prompt_template: |
+  Produce a milestone plan that aligns resources with the client's objectives.
+metrics:
+  focus: roadmap
+  cadence: weekly

@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
 
-from backend.db import AnalyticsSnapshot, GmailToken, Lead, Run, get_session
+from backend.db import AnalyticsSnapshot, Lead, Run, User, get_session
 
 
 def _parse_date(value: Optional[str]) -> Optional[datetime]:
@@ -23,6 +23,7 @@ def _apply_status_defaults(status_breakdown: Dict[str, int]) -> Dict[str, int]:
 
 async def fetch_metrics(
     user_id: str,
+    org_id: str,
     *,
     start: Optional[str] = None,
     end: Optional[str] = None,
@@ -32,7 +33,7 @@ async def fetch_metrics(
     end_dt = _parse_date(end)
 
     async with get_session() as session:
-        lead_stmt = select(Lead).where(Lead.user_id == user_id)
+        lead_stmt = select(Lead).where(Lead.org_id == org_id)
         if client_type and client_type.lower() != "all":
             lead_stmt = lead_stmt.where(Lead.client_type == client_type)
         if start_dt:
@@ -103,18 +104,19 @@ async def fetch_metrics(
 
 async def get_user_summary(
     user_id: str,
+    org_id: str,
     *,
     start: Optional[str] = None,
     end: Optional[str] = None,
     client_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    metrics = await fetch_metrics(user_id, start=start, end=end, client_type=client_type)
+    metrics = await fetch_metrics(user_id, org_id, start=start, end=end, client_type=client_type)
 
     async with get_session() as session:
         recent_snapshots = (
             await session.execute(
                 select(AnalyticsSnapshot)
-                .where(AnalyticsSnapshot.user_id == user_id)
+                .where(AnalyticsSnapshot.org_id == org_id)
                 .order_by(AnalyticsSnapshot.ts.desc())
                 .limit(30)
             )
@@ -134,11 +136,12 @@ async def get_user_summary(
     return metrics
 
 
-async def recompute_snapshot_for_user(user_id: str) -> Dict[str, Any]:
-    metrics = await fetch_metrics(user_id)
+async def recompute_snapshot_for_user(user_id: str, org_id: str) -> Dict[str, Any]:
+    metrics = await fetch_metrics(user_id, org_id)
     async with get_session() as session:
         snapshot = AnalyticsSnapshot(
             user_id=user_id,
+            org_id=org_id,
             total_leads=metrics["leads"],
             proposals_sent=metrics["proposals"],
             followups_sent=metrics["followups"],
@@ -153,10 +156,17 @@ async def recompute_snapshot_for_user(user_id: str) -> Dict[str, Any]:
 
 async def recompute_all_snapshots() -> None:
     async with get_session() as session:
-        lead_users = (await session.execute(select(Lead.user_id).distinct())).all()
-        token_users = (await session.execute(select(GmailToken.user_id).distinct())).all()
+        users = (await session.execute(select(User.id, User.org_id).distinct())).all()
 
-    user_ids = {user_id for (user_id,) in lead_users + token_users if user_id}
+    for user_id, org_id in users:
+        if user_id and org_id:
+            await recompute_snapshot_for_user(user_id, org_id)
 
-    for user_id in user_ids:
-        await recompute_snapshot_for_user(user_id)
+
+async def revenue_overview(user_id: str, org_id: str) -> Dict[str, Any]:
+    metrics = await fetch_metrics(user_id, org_id)
+    return {
+        "conversion_rate": metrics["conversion_rate"],
+        "total_revenue": metrics["revenue"],
+        "monthly": metrics["revenue_by_month"],
+    }

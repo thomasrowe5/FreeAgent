@@ -1,5 +1,8 @@
+"""Automated follow-up email generation utilities."""
+
 import os
 from functools import lru_cache
+from typing import Iterable, Optional
 
 from backend import monitoring
 
@@ -32,7 +35,42 @@ def _get_client():
         return None
 
 
-def compose(name: str, days_after: int, last_message: str = "") -> str:
+def _format_context(context: Optional[Iterable[dict]]) -> str:
+    if not context:
+        return ""
+    lines = []
+    for item in context:
+        meta = item.get("metadata") or {}
+        text = (item.get("text") or "").strip().replace("\n", " ")
+        snippet = text[:280]
+        if len(text) > 280:
+            snippet += "..."
+        lead_name = meta.get("lead_name") or "Lead"
+        outcome = meta.get("outcome")
+        if outcome:
+            lines.append(f"- {lead_name}: {snippet} | Outcome: {outcome}")
+        else:
+            lines.append(f"- {lead_name}: {snippet}")
+    return "\n".join(lines)
+
+
+def compose(
+    name: str,
+    days_after: int,
+    last_message: str = "",
+    context: Optional[Iterable[dict]] = None,
+) -> str:
+    """Generate a branded follow-up email using optional memory context.
+
+    Args:
+        name: Recipient name.
+        days_after: Days since proposal was sent.
+        last_message: Original inquiry or proposal summary.
+        context: Optional vector-memory snippets to reference.
+
+    Returns:
+        str: The composed follow-up message.
+    """
     client = _get_client()
     if not client:
         return _fallback(name, days_after, last_message)
@@ -44,6 +82,9 @@ def compose(name: str, days_after: int, last_message: str = "") -> str:
         f"Days since proposal sent: {days_after}\n"
         f"Original inquiry details:\n{last_message}"
     )
+    context_text = _format_context(context)
+    if context_text:
+        prompt += f"\n\nRecent related outcomes:\n{context_text}"
 
     try:
         response = client.responses.create(model="gpt-4o-mini", input=prompt)

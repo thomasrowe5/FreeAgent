@@ -201,6 +201,7 @@ async def test_full_pipeline(app_context):
         lead_id = lead["id"]
         assert lead["status"] == "followup_pending"
         assert lead["client_type"] == "general"
+        assert lead["org_id"]
 
         # Verify proposal persisted
         async with db.get_session() as session:
@@ -240,3 +241,4 @@ async def test_full_pipeline(app_context):
         assert billing_resp.status_code == 200
         billing_status = billing_resp.json()
         assert billing_status["usage"] >= 2
+        assert billing_status["plan"]

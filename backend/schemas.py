@@ -22,6 +22,7 @@ class LeadOut(BaseModel):
     value: float
     client_type: str
     created_at: datetime
+    org_id: str
 
 
 class ProposalIn(BaseModel):
@@ -33,6 +34,7 @@ class ProposalOut(BaseModel):
     lead_id: int
     content: str
     created_at: datetime
+    reward_score: Optional[float] = None
 
 
 class FollowupIn(BaseModel):
@@ -68,3 +70,19 @@ class FeedbackIn(BaseModel):
 
 class InviteIn(BaseModel):
     email: Optional[EmailStr] = None
+
+
+class MemoryAddIn(BaseModel):
+    key: str
+    value: str
+    payload: Optional[dict] = None
+
+
+class MemorySearchIn(BaseModel):
+    query: str
+    limit: int = 5
+
+
+class AgentConfigUpdateIn(BaseModel):
+    name: str
+    prompt_template: str

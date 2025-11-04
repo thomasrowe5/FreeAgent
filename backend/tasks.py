@@ -1,5 +1,6 @@
 import asyncio
 import os
+from typing import Optional
 
 from celery import Celery
 
@@ -30,5 +31,5 @@ def recompute_analytics_task() -> None:
 
 
 @celery_app.task
-def run_workflow_task(lead_id: int, user_id: str, start_from: str = "score") -> None:
-    asyncio.run(Workflow(lead_id, user_id).run(start_from=start_from))
+def run_workflow_task(lead_id: int, user_id: str, org_id: Optional[str] = None, start_from: str = "score") -> None:
+    asyncio.run(Workflow(lead_id, user_id, org_id).run(start_from=start_from))

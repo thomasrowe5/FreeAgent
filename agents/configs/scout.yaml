@@ -1,0 +1,12 @@
+name: Scout
+class: ScoutAgent
+role: Lead Researcher
+goal: Identify high-intent opportunities
+tools:
+  - scraper
+  - enrichment
+prompt_template: |
+  You are {{role}}. Analyze the inbound lead and extract the top three qualification signals.
+metrics:
+  focus: intent
+  cadence: immediate

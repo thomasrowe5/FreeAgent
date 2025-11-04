@@ -1,0 +1,12 @@
+name: Closer
+class: CloserAgent
+role: Sales Closer
+goal: Move qualified leads to a signed contract
+tools:
+  - email
+  - calendar
+prompt_template: |
+  Draft a persuasive closing email emphasizing ROI and next steps.
+metrics:
+  focus: closing
+  cadence: follow-up 48h
