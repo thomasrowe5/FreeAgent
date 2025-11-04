@@ -1,0 +1,74 @@
+services:
+  - type: web
+    name: freeagent-api
+    env: docker
+    plan: starter
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: freeagent-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: freeagent-redis
+          property: connectionString
+      - key: SUPABASE_URL
+      - key: SUPABASE_KEY
+      - key: SUPABASE_JWT_SECRET
+      - key: OPENAI_API_KEY
+      - key: GOOGLE_CLIENT_ID
+      - key: GOOGLE_CLIENT_SECRET
+      - key: GOOGLE_REDIRECT_URI
+      - key: SENTRY_DSN
+      - key: STRIPE_CHECKOUT_URL
+      - key: NEXT_PUBLIC_API_URL
+        value: https://freeagent-api.onrender.com
+  - type: worker
+    name: freeagent-worker
+    env: docker
+    plan: starter
+    dockerfilePath: Dockerfile
+    command: celery -A backend.worker worker --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: freeagent-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: freeagent-redis
+          property: connectionString
+      - key: SUPABASE_URL
+      - key: SUPABASE_KEY
+      - key: SUPABASE_JWT_SECRET
+      - key: OPENAI_API_KEY
+      - key: GOOGLE_CLIENT_ID
+      - key: GOOGLE_CLIENT_SECRET
+      - key: GOOGLE_REDIRECT_URI
+      - key: SENTRY_DSN
+      - key: STRIPE_CHECKOUT_URL
+  - type: web
+    name: freeagent-web
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    rootDir: frontend
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://freeagent-api.onrender.com
+      - key: SUPABASE_URL
+      - key: SUPABASE_KEY
+      - key: STRIPE_CHECKOUT_URL
+
+databases:
+  - name: freeagent-db
+    databaseName: freeagent
+    plan: starter
+
+redis:
+  - name: freeagent-redis
+    plan: starter

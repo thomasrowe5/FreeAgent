@@ -13,7 +13,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.48.0",
     "next": "^15.5.5",
+    "recharts": "^2.12.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   }

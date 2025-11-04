@@ -1,0 +1,27 @@
+Loom Demo Outline
+=================
+
+1. Intro (0:00-0:30)
+   - Greet viewers, introduce FreeAgent.
+   - Explain demo agenda: capture lead → auto proposal → analytics/billing insights.
+
+2. Lead Intake (0:30-2:00)
+   - Show landing page highlights.
+   - Submit a new lead on dashboard; point out client type and value fields.
+   - Mention automatic LLM scoring & proposal generation.
+
+3. Proposal Review & Feedback (2:00-3:30)
+   - Open generated proposal, tweak copy in the editor.
+   - Submit feedback to show how edits are saved for training.
+
+4. Analytics & Billing (3:30-4:30)
+   - Navigate to analytics page, demonstrate filters, revenue charts, and conversion.
+   - Check billing usage and upgrade CTA.
+
+5. Collaboration Tools (4:30-5:30)
+   - Generate an invite token for beta users via /invite.
+   - Highlight follow-up automation and lead history.
+
+6. Closing (5:30-6:00)
+   - Recap key value props, mention roadmap (feedback-driven fine-tuning).
+   - Provide call to action and contact info.

@@ -15,3 +15,12 @@ __pycache__/
 # OS / misc
 .DS_Store
 .env
+.venv
+
+# Ignore environment and build artifacts
+.venv/
+node_modules/
+__pycache__/
+.env
+.DS_Store
+*.log
